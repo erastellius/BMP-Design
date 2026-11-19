@@ -1,23 +1,35 @@
+export const MISSING_AI_KEY_ERROR = "Missing valid FAL_KEY or OPENAI_API_KEY in .env";
+
+export function hasValidAiProviderKey(provider = process.env.AI_PROVIDER || "fal") {
+  const key = provider === "fal" ? process.env.FAL_KEY : process.env.OPENAI_API_KEY;
+  return !!key?.trim() && key.trim() !== "your_fal_api_key_here";
+}
+
 export async function ollamaScenePrompt(compositeImage: string, mask: string): Promise<string> {
   const ollamaUrl = process.env.OLLAMA_URL || "http://docker.internal";
-  const response = await fetch(`${ollamaUrl}/api/generate`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: process.env.OLLAMA_MODEL || "qwen2.5vl:3b",
-      prompt: "Create one concise image editing prompt to blend pergola shadows and natural lighting into this backyard scene. Preserve all manufactured pergola geometry. The white mask area may be edited; the black mask area is protected.",
-      images: [
-        compositeImage.replace(/^data:image\/[^;]+;base64,/, ""),
-        mask.replace(/^data:image\/[^;]+;base64,/, "")
-      ],
-      stream: false,
-      keep_alive: "2m"
-    }),
-    signal: AbortSignal.timeout(120000)
-  });
-  if (!response.ok) throw new Error(`Ollama prompt generation failed: ${response.status}`);
-  const data = await response.json() as { response?: string };
-  return data.response?.trim() || "Photorealistically blend natural pergola shadows and consistent daylight.";
+  try {
+    const response = await fetch(`${ollamaUrl}/api/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: process.env.OLLAMA_MODEL || "qwen2.5vl:3b",
+        prompt: "Create one concise image editing prompt to blend pergola shadows and natural lighting into this backyard scene. Preserve all manufactured pergola geometry. The white mask area may be edited; the black mask area is protected.",
+        images: [
+          compositeImage.replace(/^data:image\/[^;]+;base64,/, ""),
+          mask.replace(/^data:image\/[^;]+;base64,/, "")
+        ],
+        stream: false,
+        keep_alive: "2m"
+      }),
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!response.ok) throw new Error(`Ollama prompt generation failed: ${response.status}`);
+    const data = await response.json() as { response?: string };
+    return data.response?.trim() || "Photorealistically blend natural pergola shadows and consistent daylight.";
+  } catch (error) {
+    console.warn("Ollama prompt generation unavailable; using a default blend prompt", error);
+    return "Photorealistically blend natural pergola shadows and consistent daylight.";
+  }
 }
 
 function toFile(base64: string, name: string) {
@@ -26,7 +38,7 @@ function toFile(base64: string, name: string) {
 }
 
 export async function blendWithFal(prompt: string, compositeImage: string, mask: string) {
-  if (!process.env.FAL_KEY) throw new Error("FAL_KEY is not configured");
+  if (!hasValidAiProviderKey("fal")) throw new Error(MISSING_AI_KEY_ERROR);
   const response = await fetch("https://fal.run/fal-ai/flux-pro/v1/fill", {
     method: "POST",
     headers: { authorization: `Key ${process.env.FAL_KEY}`, "content-type": "application/json" },
@@ -46,7 +58,7 @@ export async function blendWithFal(prompt: string, compositeImage: string, mask:
 }
 
 export async function blendWithOpenAI(prompt: string, compositeImage: string, mask: string) {
-  if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
+  if (!hasValidAiProviderKey("openai")) throw new Error(MISSING_AI_KEY_ERROR);
   const form = new FormData();
   form.set("model", "gpt-image-1");
   form.set("prompt", prompt);

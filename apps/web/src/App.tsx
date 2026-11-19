@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Moon, Sun, UserRound, Shield } from "lucide-react";
 import LeftCatalogSidebar from "./components/LeftCatalogSidebar";
 import DesignCanvas from "./components/DesignCanvas";
@@ -13,8 +13,15 @@ export default function App() {
   const [authOpen, setAuthOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [studioOpen, setStudioOpen] = useState(false);
+  const [studioToast, setStudioToast] = useState("");
   const [drawer, setDrawer] = useState<"catalog" | "inspector" | null>(null);
   const user = useCanvasStore(state => state.user);
+
+  useEffect(() => {
+    if (!studioToast) return;
+    const timeout = window.setTimeout(() => setStudioToast(""), 3500);
+    return () => window.clearTimeout(timeout);
+  }, [studioToast]);
 
   const toggleTheme = () => {
     setLight(value => {
@@ -74,7 +81,12 @@ export default function App() {
         )}
       </div>
 
-      <SpriteStudioModal open={studioOpen} onClose={() => setStudioOpen(false)} />
+      <SpriteStudioModal
+        open={studioOpen}
+        onClose={() => setStudioOpen(false)}
+        onSuccess={() => setStudioToast("Transparent sprite added to Parts Catalog and downloaded")}
+      />
+      {studioToast && <div role="status" className="fixed z-[60] bottom-5 left-1/2 -translate-x-1/2 rounded-lg bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg">{studioToast}</div>}
       <Auth2FAModal open={authOpen} onClose={() => setAuthOpen(false)} />
       <AdminUsersModal open={adminOpen} onClose={() => setAdminOpen(false)} />
     </div>
