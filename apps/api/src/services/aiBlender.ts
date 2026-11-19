@@ -1,35 +1,122 @@
-export const MISSING_AI_KEY_ERROR = "Missing valid FAL_KEY or OPENAI_API_KEY in .env";
+export const MISSING_AI_KEY_ERROR = "Missing valid FAL_KEY or OPENAI_API_KEY in .env. Add a valid provider key to apps/api/.env and restart the API.";
+
+export type LightingParams = {
+  sunDirection: string;
+  shadowAngleDeg: number;
+  shadowBlur: number;
+  shadowOpacity: number;
+  ambientTintHex: string;
+  ambientTemp: string;
+  brightness: number;
+  contrast: number;
+  suggestedSkewY: number;
+  perspectiveMatch: string;
+  lightingSummary: string;
+  fullReasoning: string;
+};
+
+const defaultLightingParams: LightingParams = {
+  sunDirection: "Upper-left",
+  shadowAngleDeg: 135,
+  shadowBlur: 14,
+  shadowOpacity: 0.35,
+  ambientTintHex: "#E8D6B8",
+  ambientTemp: "Warm natural daylight",
+  brightness: 0.04,
+  contrast: 4,
+  suggestedSkewY: 0,
+  perspectiveMatch: "Perspective retained from the uploaded scene.",
+  lightingSummary: "Applied balanced natural daylight with a soft pergola shadow.",
+  fullReasoning: "The scene could not be analyzed, so balanced default pergola lighting was applied."
+};
 
 export function hasValidAiProviderKey(provider = process.env.AI_PROVIDER || "fal") {
   const key = provider === "fal" ? process.env.FAL_KEY : process.env.OPENAI_API_KEY;
-  return !!key?.trim() && key.trim() !== "your_fal_api_key_here";
+  const normalizedKey = key?.trim().toLowerCase();
+  return !!normalizedKey &&
+    !/^your_.+_api_key_here$/.test(normalizedKey) &&
+    !["replace_me", "changeme", "placeholder"].includes(normalizedKey);
 }
 
-export async function ollamaScenePrompt(compositeImage: string, mask: string): Promise<string> {
-  const ollamaUrl = process.env.OLLAMA_URL || "http://docker.internal";
+function finiteInRange(value: unknown, min: number, max: number, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(min, Math.min(max, value))
+    : fallback;
+}
+
+function readLightingParams(value: unknown): LightingParams {
+  if (!value || typeof value !== "object") return { ...defaultLightingParams };
+  const parsed = value as Partial<LightingParams>;
+  return {
+    sunDirection: typeof parsed.sunDirection === "string" && parsed.sunDirection.trim()
+      ? parsed.sunDirection.trim().slice(0, 120)
+      : defaultLightingParams.sunDirection,
+    shadowAngleDeg: finiteInRange(parsed.shadowAngleDeg, 0, 360, defaultLightingParams.shadowAngleDeg),
+    shadowBlur: finiteInRange(parsed.shadowBlur, 0, 50, defaultLightingParams.shadowBlur),
+    shadowOpacity: finiteInRange(parsed.shadowOpacity, 0, 1, defaultLightingParams.shadowOpacity),
+    ambientTintHex: typeof parsed.ambientTintHex === "string" && /^#[\da-f]{6}$/i.test(parsed.ambientTintHex)
+      ? parsed.ambientTintHex
+      : defaultLightingParams.ambientTintHex,
+    ambientTemp: typeof parsed.ambientTemp === "string" && parsed.ambientTemp.trim()
+      ? parsed.ambientTemp.trim().slice(0, 120)
+      : defaultLightingParams.ambientTemp,
+    brightness: finiteInRange(parsed.brightness, -0.2, 0.2, defaultLightingParams.brightness),
+    contrast: finiteInRange(parsed.contrast, -20, 20, defaultLightingParams.contrast),
+    suggestedSkewY: finiteInRange(parsed.suggestedSkewY, -0.5, 0.5, defaultLightingParams.suggestedSkewY),
+    perspectiveMatch: typeof parsed.perspectiveMatch === "string" && parsed.perspectiveMatch.trim()
+      ? parsed.perspectiveMatch.trim().slice(0, 200)
+      : defaultLightingParams.perspectiveMatch,
+    lightingSummary: typeof parsed.lightingSummary === "string" && parsed.lightingSummary.trim()
+      ? parsed.lightingSummary.trim().slice(0, 300)
+      : defaultLightingParams.lightingSummary,
+    fullReasoning: typeof parsed.fullReasoning === "string" && parsed.fullReasoning.trim()
+      ? parsed.fullReasoning.trim().slice(0, 1500)
+      : defaultLightingParams.fullReasoning
+  };
+}
+
+export async function analyzeSceneWithOllama(
+  compositeImage: string,
+  model = "qwen3.5:4b-mlx"
+): Promise<LightingParams> {
   try {
-    const response = await fetch(`${ollamaUrl}/api/generate`, {
+    const response = await fetch(`${process.env.OLLAMA_URL || "http://docker.internal"}/api/generate`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: process.env.OLLAMA_MODEL || "qwen2.5vl:3b",
-        prompt: "Create one concise image editing prompt to blend pergola shadows and natural lighting into this backyard scene. Preserve all manufactured pergola geometry. The white mask area may be edited; the black mask area is protected.",
-        images: [
-          compositeImage.replace(/^data:image\/[^;]+;base64,/, ""),
-          mask.replace(/^data:image\/[^;]+;base64,/, "")
-        ],
+        model,
+        prompt: [
+          "Analyze the pergola scene lighting and return only a JSON object with these fields:",
+          "sunDirection (short description),",
+          "shadowAngleDeg (number, 0-360), shadowBlur (number, 0-50), shadowOpacity (number, 0-1),",
+          "ambientTintHex (six-digit hex color), ambientTemp (short color-temperature description),",
+          "brightness (number, -0.2 to 0.2), contrast (number, -20 to 20),",
+          "suggestedSkewY (number, -0.5 to 0.5), perspectiveMatch (short perspective description),",
+          "lightingSummary (one concise sentence), fullReasoning (brief explanation of the scene and chosen adjustments)."
+        ].join(" "),
+        images: [compositeImage.replace(/^data:image\/[^;]+;base64,/, "")],
+        format: "json",
         stream: false,
         keep_alive: "2m"
       }),
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(30000)
     });
-    if (!response.ok) throw new Error(`Ollama prompt generation failed: ${response.status}`);
+    if (!response.ok) throw new Error(`Ollama scene analysis failed: ${response.status}`);
     const data = await response.json() as { response?: string };
-    return data.response?.trim() || "Photorealistically blend natural pergola shadows and consistent daylight.";
+    if (!data.response) throw new Error("Ollama returned no scene lighting analysis");
+    return readLightingParams(JSON.parse(data.response));
   } catch (error) {
-    console.warn("Ollama prompt generation unavailable; using a default blend prompt", error);
-    return "Photorealistically blend natural pergola shadows and consistent daylight.";
+    console.warn("Ollama scene analysis unavailable; using default lighting parameters", error);
+    return { ...defaultLightingParams };
   }
+}
+
+export function createCloudBlendPrompt(lightingSummary: string) {
+  return [
+    "Blend the placed cedar pergola beams and black steel brackets seamlessly into the backyard in front of the house.",
+    "Cast realistic natural sunlight shadows onto the dirt ground and house wall while preserving the exact structural shape and hardware details of the placed components.",
+    `Match the scene lighting analyzed locally by Ollama: ${lightingSummary}`
+  ].join(" ");
 }
 
 function toFile(base64: string, name: string) {

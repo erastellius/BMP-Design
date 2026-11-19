@@ -2,6 +2,45 @@ import { create } from "zustand";
 import { temporal } from "zundo";
 import { pergolaCatalog, type AngleVariant, type CatalogPart } from "../data/pergolaCatalog";
 
+export type LightingParams = {
+  sunDirection: string;
+  shadowAngleDeg: number;
+  shadowBlur: number;
+  shadowOpacity: number;
+  ambientTintHex: string;
+  ambientTemp: string;
+  brightness: number;
+  contrast: number;
+  suggestedSkewY: number;
+  perspectiveMatch: string;
+  lightingSummary: string;
+  fullReasoning: string;
+};
+
+export type AiReport = {
+  modelUsed: string;
+  timestamp: string;
+  sunDirection: string;
+  shadowAngleDeg: number;
+  shadowBlur: number;
+  shadowOpacity: number;
+  ambientTemp: string;
+  ambientTintHex: string;
+  perspectiveMatch: string;
+  appliedAdjustments: string[];
+  fullReasoning: string;
+};
+
+export type AiModelOption = {
+  id: string;
+  name: string;
+  provider: "ollama" | "cloud";
+  parameterSize?: string;
+  fileSize?: number;
+  configured: boolean;
+};
+
+const DEFAULT_AI_MODEL = "ollama:qwen3.5:4b-mlx";
 const CUSTOM_CATALOG_STORAGE_KEY = "bmp-design-custom-catalog-parts";
 
 function isCustomCatalogPart(value: unknown): value is CatalogPart {
@@ -69,7 +108,18 @@ export type PlacedPart = {
   unitPrice: number;
 };
 
-type UserState = { id: number; email: string; role: "customer" | "sales_rep" | "admin" } | null;
+export type CurrentUser = { id: number; email: string; role: "customer" | "sales_rep" | "admin" };
+
+export type ActiveProject = { id: number; name: string };
+
+export type SavedCanvasState = {
+  backgroundUrl: string;
+  aiBlendedUrl: string;
+  pixelsPerInch: number;
+  parts: PlacedPart[];
+  selectedModel?: string;
+  lightingParams?: LightingParams | null;
+};
 
 export type CanvasState = {
   backgroundUrl: string;
@@ -77,11 +127,23 @@ export type CanvasState = {
   pixelsPerInch: number;
   parts: PlacedPart[];
   catalogParts: CatalogPart[];
+  selectedModel: string;
+  availableModels: AiModelOption[];
+  lightingParams: LightingParams | null;
+  lastAiReport: AiReport | null;
+  currentUser: CurrentUser | null;
+  activeProject: ActiveProject | null;
   selectedId: string | null;
-  user: UserState;
   splitPosition: number;
   setBackgroundUrl: (url: string) => void;
   setAiBlendedUrl: (url: string) => void;
+  setSelectedModel: (model: string) => void;
+  setAvailableModels: (models: AiModelOption[]) => void;
+  setLightingParams: (params: LightingParams | null) => void;
+  setLastAiReport: (report: AiReport | null) => void;
+  setCurrentUser: (user: CurrentUser | null) => void;
+  setActiveProject: (project: ActiveProject | null) => void;
+  loadProjectState: (canvasState: SavedCanvasState) => void;
   setPixelsPerInch: (value: number) => void;
   applyCalibration: (pixelDistance: number, realWorldInches: number) => boolean;
   addPart: (part: PlacedPart) => void;
@@ -91,7 +153,6 @@ export type CanvasState = {
   updatePart: (id: string, patch: Partial<PlacedPart>) => void;
   removePart: (id: string) => void;
   setSelectedId: (id: string | null) => void;
-  setUser: (user: UserState) => void;
   setSplitPosition: (value: number) => void;
 };
 
@@ -103,11 +164,38 @@ export const useCanvasStore = create<CanvasState>()(
       pixelsPerInch: 10,
       parts: [],
       catalogParts: [...pergolaCatalog, ...readCustomCatalogParts()],
+      selectedModel: DEFAULT_AI_MODEL,
+      availableModels: [],
+      lightingParams: null,
+      lastAiReport: null,
+      currentUser: null,
+      activeProject: null,
       selectedId: null,
-      user: null,
       splitPosition: 50,
       setBackgroundUrl: (backgroundUrl) => set({ backgroundUrl }),
       setAiBlendedUrl: (aiBlendedUrl) => set({ aiBlendedUrl }),
+      setSelectedModel: (selectedModel) => set({ selectedModel }),
+      setAvailableModels: (availableModels) => set((state) => ({
+        availableModels,
+        selectedModel: state.selectedModel === DEFAULT_AI_MODEL &&
+          !availableModels.some((model) => model.id === state.selectedModel)
+          ? availableModels.find((model) => model.provider === "ollama")?.id || state.selectedModel
+          : state.selectedModel
+      })),
+      setLightingParams: (lightingParams) => set({ lightingParams }),
+      setLastAiReport: (lastAiReport) => set({ lastAiReport }),
+      setCurrentUser: (currentUser) => set({ currentUser }),
+      setActiveProject: (activeProject) => set({ activeProject }),
+      loadProjectState: (canvasState) => set({
+        backgroundUrl: canvasState.backgroundUrl,
+        aiBlendedUrl: canvasState.aiBlendedUrl,
+        pixelsPerInch: canvasState.pixelsPerInch,
+        parts: canvasState.parts,
+        selectedModel: canvasState.selectedModel || DEFAULT_AI_MODEL,
+        lightingParams: canvasState.lightingParams || null,
+        selectedId: null,
+        splitPosition: 50
+      }),
       setPixelsPerInch: (pixelsPerInch) => set({ pixelsPerInch }),
       applyCalibration: (pixelDistance, realWorldInches) => {
         if (!Number.isFinite(pixelDistance) || pixelDistance <= 0 ||
@@ -173,7 +261,6 @@ export const useCanvasStore = create<CanvasState>()(
         selectedId: state.selectedId === id ? null : state.selectedId
       })),
       setSelectedId: (selectedId) => set({ selectedId }),
-      setUser: (user) => set({ user }),
       setSplitPosition: (splitPosition) => set({ splitPosition })
     }),
     { limit: 50 }

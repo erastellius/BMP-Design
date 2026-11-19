@@ -4,7 +4,11 @@ import { useCanvasStore } from "../store/useCanvasStore";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:4000";
 
-export default function Auth2FAModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function Auth2FAModal({ open, onClose, onAuthenticated }: {
+  open: boolean;
+  onClose: () => void;
+  onAuthenticated?: () => void;
+}) {
   const [mode, setMode] = useState<"login" | "register" | "2fa" | "forgot" | "reset">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -14,7 +18,7 @@ export default function Auth2FAModal({ open, onClose }: { open: boolean; onClose
   const [backupCodes, setBackupCodes] = useState<string[]>([]);
   const [resetToken, setResetToken] = useState("");
   const [message, setMessage] = useState("");
-  const user = useCanvasStore(state => state.user);
+  const user = useCanvasStore(state => state.currentUser);
 
   if (!open) return null;
 
@@ -55,8 +59,9 @@ export default function Auth2FAModal({ open, onClose }: { open: boolean; onClose
   const verify = async () => {
     try {
       const data = await call("/api/auth/2fa/verify", { challengeToken, code });
-      useCanvasStore.getState().setUser(data.user);
+      useCanvasStore.getState().setCurrentUser(data.user);
       setMessage("Authenticated");
+      onAuthenticated?.();
       onClose();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Verification failed"); }
   };
@@ -64,7 +69,8 @@ export default function Auth2FAModal({ open, onClose }: { open: boolean; onClose
   const logoutAll = async () => {
     try {
       await call("/api/auth/logout-all", {});
-      useCanvasStore.getState().setUser(null);
+      useCanvasStore.getState().setCurrentUser(null);
+      useCanvasStore.getState().setActiveProject(null);
       setMessage("Signed out of all devices");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Logout failed"); }
   };
