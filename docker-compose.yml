@@ -1,0 +1,39 @@
+services:
+  frontend:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile.dev
+    platform: linux/arm64
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:4000
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.dev
+    platform: linux/arm64
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./apps/api:/app
+      - ./data:/app/data
+      - /app/node_modules
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    deploy:
+      resources:
+        limits:
+          memory: 256M
